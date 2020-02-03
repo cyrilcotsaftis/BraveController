@@ -3,6 +3,10 @@
 import rospy
 import numpy as np
 import utm
+
+from numpy import cos, sin, arctan, arctan2, pi, cross, hstack, array, log
+from numpy.linalg import det, norm
+
 from std_msgs.msg import String
 from std_msgs.msg import UInt16
 from std_msgs.msg import Bool
@@ -13,11 +17,9 @@ from ublox.msg import Compass
 from ublox.msg import Meteo
 from ublox.msg import Wind
 
-from roblib import * 
 
 
-pi = np.pi
-r,zeta,δr_max,beta = 10, pi/4, 1, pi/4
+r,zeta,beta = 10, pi/4, pi/4
 rho = 6371000
 gamma_inf = pi/4
 delta_rmax = 1
@@ -26,7 +28,7 @@ delta_rmax = 1
 class Controller():
 
 
-    def __init__(self, pwm_max=1500, pwm_neutral=1500,rosrate=4):
+    def __init__(self,rosrate=4):
         self.pub_pwm = rospy.Publisher('/Command', Command, queue_size=10)
 
         rospy.Subscriber('/ublox_GPRMC', Gps, self._callback_gps)
@@ -44,10 +46,10 @@ class Controller():
 
         self.pwm_mid_rudder = 1250 
         self.pwm_mid_main_sail = 1460
-        self.pwm_mid_fore_sail = 1710     
+        self.pwm_mid_fore_sail = 1460    
 
         self.pwm_max_rudder = 1600
-        self.pwm_max_main_sail = 1460
+        self.pwm_max_main_sail = 1710
         self.pwm_max_fore_sail = 1710 
 
         self.q = 0
@@ -86,7 +88,7 @@ class Controller():
 		float64 magnetic_declination
 		"""
 
-		self.heading = msg.heading
+		self.heading = self.wind_direction2psi( msg.heading )  
 
 
     def _callback_meteo(self, msg):
@@ -119,30 +121,35 @@ class Controller():
         self.lxb, self.lyb = msg.lxb, msg.lyb
           
 
-    # def control(self):
-
-    # 	(EASTING, NORTHING, ZONE NUMBER, ZONE LETTER) = utm.from_latlon(self.latitude, self.longitude)
-    #     m = array([[EASTING], [NORTHING]]) #position x,y robot
-    #     theta = self.heading #cap robot
-    #     e = det(hstack((self.b-self.a,m-self.a)))/norm(self.b-self.a)
-    #     if abs(e) > r:
-    #         self.q = sign(e)
-    #     phi = arctan2(self.b[1,0]-self.a[1,0],self.b[0,0]-self.a[0,0])
-    #     theta_bar = phi-arctan(e/r)
-    #     if (cos(self.ψ-theta_bar) + cos(zeta) < 0) or ( (abs(e)<r) and (cos(self.ψ-phi) + cos(zeta) < 0)):
-    #         theta_bar = pi + self.ψ - self.q*zeta
-    #     δr = (δr_max/pi)*self.sawtooth(theta-theta_bar)
-    #     δsmax = (pi/2)*( (cos(self.ψ-theta_bar)+1)/2 )**(log(pi/2*beta)/log(2))
-    #     return  δr, δsmax
-
-
     def control(self):
+        a = self.gps2geographic(self.lxa, self.lya)
+        b = self.gps2geographic(self.lxb, self.lyb)
+        m = self.gps2geographic(self.lxm, self.lym)
+        theta = self.heading #cap robot
+        e = det(hstack((b-a,m-a)))/norm(b-a)
+
+        if abs(e) > r:
+            self.q = sign(e)
+
+        phi = arctan2(b[1,0]-a[1,0],b[0,0]-a[0,0])
+        theta_bar = phi-arctan(e/r)
+
+        if (cos(self.psi-theta_bar) + cos(zeta) < 0) or ( (abs(e)<r) and (cos(self.psi-phi) + cos(zeta) < 0)):
+            theta_bar = pi + self.psi - self.q*zeta
+
+        delta_r = (delta_rmax/pi)*self.sawtooth(theta-theta_bar)
+        delta_smax = (pi/2)*( (cos(self.psi-theta_bar)+1)/2 )**(log(pi/2*beta)/log(2))
+
+        return  delta_r, delta_smax
+
+
+    def control2(self):
 
         a = self.gps2geographic(self.lxa, self.lya)
         b = self.gps2geographic(self.lxb, self.lyb)
         m = self.gps2geographic(self.lxm, self.lym)
-        n = np.cross(a,b)/(norm(a)*norm(b))
-        e = m@n.T
+        n = cross(a,b)/(norm(a)*norm(b))
+        e = np.dot(m,n.T)
         theta = self.heading
 
         if abs(e) > r/2 :
@@ -150,7 +157,7 @@ class Controller():
 
         M = array([ [-sin(self.lxm), cos(self.lxm), 0],
                     [-cos(self.lxm)*sin(self.lym), -sin(self.lxm)*sin(self.lym), cos(self.lym)] ])
-        P = M@(b-a).T
+        P = np.dot(M,(b-a).T)
         phi = arctan2(P[1,0], P[0,0])
 
         theta_bar = phi - (2*gamma_inf/pi)*arctan(e/r)
@@ -170,7 +177,11 @@ class Controller():
 
     def gps2geographic(self, lx, ly): #lx : longitude, ly : latitude
 
-        return array([[rho*cos(ly)*cos(lx), rho*cos(ly)*sin(lx), rho*sin(ly)]])
+        (EASTING, NORTHING, ZONE NUMBER, ZONE LETTER) = utm.from_latlon(ly, lx)
+        return array([[EASTING], [NORTHING]])
+
+        # return array([[rho*cos(ly)*cos(lx), rho*cos(ly)*sin(lx), rho*sin(ly)]]) #pour control2()
+
     
         
     def saturation(self, pwm, pwm_min, pwm_max):
@@ -199,7 +210,7 @@ class Controller():
         ------
         x: rad 
         """
-        return (x+PI)%(2*PI)-PI   
+        return (x+pi)%(2*pi)-pi   
 
 
     def deg2rad(self, x):
@@ -217,8 +228,8 @@ class Controller():
         -------
         Angle of the wind in rad, in trigonometric circle
         """
-        wind_direction = deg2rad(wind_direction)
-        psi = sawtooth(pi/2 - wind_direction)
+        wind_direction = self.deg2rad(wind_direction)
+        psi = self.sawtooth(pi/2 - wind_direction)
         return psi
 
 

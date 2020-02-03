@@ -36,6 +36,7 @@ def f(x,u):
 def control(x,q):
     m = array([[x[0,0]], [x[1,0]]])
     theta = x[2,0]
+    print(theta)
     e = det(hstack((b-a,m-a)))/norm(b-a)
     if abs(e) > r:
         q = sign(e)
