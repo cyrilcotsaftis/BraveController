@@ -52,6 +52,10 @@ add_message_files(
    FILES
    Command.msg
    Waypoints.msg
+   Compass.msg
+   Gps.msg
+   Meteo.msg
+   Wind.msg
  )
 
 ## Generate services in the 'srv' folder
