@@ -25,6 +25,7 @@ delta_rmax = pi/3
 EARTH_RADIUS = 6371000.
 lat0, lon0 = (48.198427, -3.014750)
 
+
 class Controller():
 
 
@@ -54,16 +55,14 @@ class Controller():
 
 		self.q = 0
 
-		self.lxa, self.lya = -3.013613, 48.198712
-		self.lxb, self.lyb = -3.016612, 48.199009 
+		self.lxa, self.lya = -3.015894, 48.197031
+		self.lxb, self.lyb = -3.016162, 48.202015
 		self.lxm, self.lym = 0., 0.
 		self.heading = 0.
 		self.psi = 0.
 		self.lat_str = ''
 		self.lon_str = ''
 
-		self.FirstLine = True
-		self.pt1, self.pt2 = array([]), array([])
 
 
 	def _callback_gps(self, msg):
@@ -106,6 +105,7 @@ class Controller():
 		string heading_indic
 		float64 magnetic_declination
 		"""
+
 		self.heading = self.north2east( msg.heading )  
 
 
@@ -139,33 +139,24 @@ class Controller():
 	#     self.lxb, self.lyb = msg.lxb, msg.lyb
 		  
 
-	def control(self, a, b, m):
+	def control(self):
 		ke=0.5
 		# a = self.gps2cart(self.lxa, self.lya)
 		# b = self.gps2cart(self.lxb, self.lyb)
 		# m = self.gps2cart(self.lxm, self.lym)
+		xa, ya = self.WGS84_to_cart(self.lya, self.lxa)
+		xb, yb = self.WGS84_to_cart(self.lyb, self.lxb)
+		xm, ym = self.WGS84_to_cart(self.lym, self.lxm)
 
-		# lxa, lya = -3.015067, 48.198905
-		# lxb, lyb = -3.015603, 48.198301
-		# lxc, lyc = -3.016049, 48.198762
-
-		# xa, ya = self.WGS84_to_cart(lya, lxa)
-		# xb, yb = self.WGS84_to_cart(lyb, lxb)
-		# xc, yc = self.WGS84_to_cart(lyc, lxc)
-		# xm, ym = self.WGS84_to_cart(self.lym, self.lxm)
-
-
-		# a = array([[xa],[ya]])
-		# b = array([[xb],[yb]])
-		# #c = array([[xc],[yc]])
-
-		# m = array([[xm],[ym]])
+		a = array([[xa],[ya]])
+		b = array([[xb],[yb]])
+		m = array([[xm],[ym]])
 
 		# print("m:",m)
 
 
 		
-
+		theta = self.heading #cap robot
 		# print("theta", math.degrees(theta)+90)
 		"""
 		#print("theta",theta)
@@ -195,43 +186,11 @@ class Controller():
 		return  delta_r, delta_smax
 		"""
 
-		################ Controle Rudder ##############
-		#------------- Controle en cap ----------------
-		theta = self.heading #cap robot
-		phi = arctan2(b[1,0]-a[1,0],b[0,0]-a[0,0])
-		cap = self.sawtooth(theta-phi)
+		theta_bar = arctan2(b[1,0]-a[1,0],b[0,0]-a[0,0])
+		cap = self.sawtooth(theta-theta_bar)
+		delta_r = -(delta_rmax/pi)*cap
 
-		delta_r = -(delta_rmax/pi)*cap #de -pi/3 a pi/3
-
-
-		#------------ Ajout ecart a la ligne --------
-		e = det(hstack((b-a,m-a)))/norm(b-a)
-		thetaBar = phi - ke*arctan(e/r)
-		print("Ecart ligne : ", e)
-
-				
-
-		#----------- Ajout "remonte au vent" ---------
-		#zeta = angle a partir du quel on considere qu'on remonte au vent (pi/4 un peu fort --- pi/6 mieux ?)
-		if abs(e) > r:# on est en dehors du chenal
-			self.q = np.sign(e) #de quel cote on est de la ligne
-
-		#si mon angle vent - angle boat < zeta ou "je suis dans la zone de louvoiment" et mon vent - angle ligne < zeta ????
-		if cos(self.psi-thetaBar) + cos(zeta) < 0:
-			print("remonte le vent")
-			thetaBar = pi + self.psi - self.q*zeta
-
-		
-
-		
-		delta_r = (delta_rmax/pi) * self.sawtooth(thetaBar-theta)#de -pi/3 a pi/3
-		
-		############## Controle des voiles ############
-		delta_s = pi/2 * ((cos(self.psi-theta) + 1)/2)
-
-		
-
-		return delta_r, delta_s
+		return delta_r, pi/2
 
 
 
@@ -370,47 +329,12 @@ class Controller():
 
 
 	def main(self):
-		lxa, lya = -3.015067, 48.198905
-		lxb, lyb = -3.015603, 48.198301
-		lxc, lyc = -3.016049, 48.198762
-
-		xa, ya = self.WGS84_to_cart(lya, lxa)
-		xb, yb = self.WGS84_to_cart(lyb, lxb)
-		xc, yc = self.WGS84_to_cart(lyc, lxc)
-
-		xm, ym = self.WGS84_to_cart(self.lym, self.lxm)
 
 
-		a = array([[xa],[ya]])
-		b = array([[xb],[yb]])
-		c = array([[xc],[yc]])
-
-		m = array([[xm],[ym]])
-
-
-		if abs(m[0]-b[0])<5 and abs(m[1]-b[1])<5:
-			print("ligne bc")
-			self.FirstLine = False
-			self.pt1 = b
-			self.pt2 = c
-			#u1, u2 = self.control(b,c,m) 
-		elif abs(m[0]-c[0])<5 and abs(m[1]-c[1])<5:
-			print("ligne ca")
-			self.FirstLine = False
-			self.pt1 = c
-			self.pt2 = a
-			#u1, u2 = self.control(c,a,m) 
-		if self.FirstLine:
-			print("ligne ab")
-			self.pt1 = a
-			self.pt2 = b
-			#u1, u2 = self.control(a,b,m) 
-
-		u1, u2 = self.control(self.pt1,self.pt2,m) 
-
+		u1, u2 = self.control() 
 		delta_rudder, delta_main_sail, delta_fore_sail = u1, u2, u2
 
-		pwm_rudder = self.rad2pwm(-delta_rudder, "rudder")
+		pwm_rudder = self.rad2pwm(delta_rudder, "rudder")
 		pwm_main_sail = self.rad2pwm(delta_main_sail, "main")
 		pwm_fore_sail = self.rad2pwm(delta_fore_sail, "fore")
 
